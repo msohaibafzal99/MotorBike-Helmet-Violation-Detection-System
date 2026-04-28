@@ -5,6 +5,7 @@ import tempfile
 from PIL import Image
 import av
 from streamlit_webrtc import webrtc_streamer, VideoTransformerBase
+import imageio.v3 as iio
 
 # ---------------- PAGE CONFIG ----------------
 st.set_page_config(
@@ -17,12 +18,10 @@ st.set_page_config(
 st.markdown("""
 <style>
 
-/* Background */
 .stApp {
     background-color: #0f172a;
 }
 
-/* Title */
 .main-title {
     font-size: 42px;
     font-weight: 800;
@@ -31,7 +30,6 @@ st.markdown("""
     margin-bottom: 5px;
 }
 
-/* Subtitle */
 .sub-text {
     text-align: center;
     color: #94a3b8;
@@ -39,18 +37,15 @@ st.markdown("""
     margin-bottom: 25px;
 }
 
-/* Sidebar */
 section[data-testid="stSidebar"] {
     background-color: #111827;
     padding: 20px;
 }
 
-/* Sidebar text */
 section[data-testid="stSidebar"] * {
     color: #e5e7eb;
 }
 
-/* Sidebar title */
 .sidebar-title {
     font-size: 20px;
     font-weight: bold;
@@ -58,7 +53,6 @@ section[data-testid="stSidebar"] * {
     margin-bottom: 10px;
 }
 
-/* Card style */
 .card {
     background: #1f2937;
     padding: 15px;
@@ -66,7 +60,6 @@ section[data-testid="stSidebar"] * {
     margin-bottom: 15px;
 }
 
-/* File uploader */
 .stFileUploader {
     background-color: #1f2937;
     padding: 10px;
@@ -136,11 +129,11 @@ if input_type == "Image":
         image_np = np.array(image)
 
         results = model(image_np)[0]
-        annotated = results.plot()  # YOLO built-in drawing
+        annotated = results.plot()
 
         st.image(annotated, channels="RGB", use_container_width=True)
 
-# ---------------- VIDEO ----------------
+# ---------------- VIDEO (FIXED - NO CV2) ----------------
 elif input_type == "Video":
 
     st.markdown("""
@@ -153,25 +146,22 @@ elif input_type == "Video":
     uploaded_video = st.file_uploader("Upload Video", type=["mp4", "avi", "mov"])
 
     if uploaded_video:
+
         tfile = tempfile.NamedTemporaryFile(delete=False)
         tfile.write(uploaded_video.read())
+        tfile.close()
 
-        import cv2  # only for video reading (safe use)
-
-        cap = cv2.VideoCapture(tfile.name)
         stframe = st.empty()
 
-        while cap.isOpened():
-            ret, frame = cap.read()
-            if not ret:
-                break
+        reader = iio.imiter(tfile.name)
+
+        for frame in reader:
+            frame = np.array(frame)
 
             results = model(frame)[0]
-            frame = results.plot()
+            annotated = results.plot()
 
-            stframe.image(frame, channels="RGB", use_container_width=True)
-
-        cap.release()
+            stframe.image(annotated, channels="RGB", use_container_width=True)
 
 # ---------------- WEBCAM (MOBILE + CLOUD SAFE) ----------------
 elif input_type == "Webcam":

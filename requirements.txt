@@ -4,3 +4,5 @@ numpy
 Pillow
 streamlit-webrtc
 av
+imageio
+imageio-ffmpeg
