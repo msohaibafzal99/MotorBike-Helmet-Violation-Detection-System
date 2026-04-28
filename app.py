@@ -1,8 +1,10 @@
 import streamlit as st
 from ultralytics import YOLO
-import cv2
 import numpy as np
 import tempfile
+from PIL import Image
+import av
+from streamlit_webrtc import webrtc_streamer, VideoTransformerBase
 
 # ---------------- PAGE CONFIG ----------------
 st.set_page_config(
@@ -117,41 +119,6 @@ st.sidebar.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-# ---------------- DRAW FUNCTION ----------------
-def draw_boxes(frame, results, threshold):
-    for box in results.boxes:
-        conf = float(box.conf[0])
-        if conf < threshold:
-            continue
-
-        x1, y1, x2, y2 = map(int, box.xyxy[0])
-        cls = int(box.cls[0])
-        label_name = results.names[cls]
-
-        label = f"{label_name} {int(conf * 100)}%"
-
-        # Color logic
-        if "without" in label_name.lower():
-            color = (0, 0, 255)  # Red
-        else:
-            color = (0, 255, 0)  # Green
-
-        # Box
-        cv2.rectangle(frame, (x1, y1), (x2, y2), color, 3)
-
-        # Big readable text
-        cv2.putText(
-            frame,
-            label,
-            (x1, y1 - 10),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.9,
-            color,
-            3
-        )
-
-    return frame
-
 # ---------------- IMAGE ----------------
 if input_type == "Image":
 
@@ -162,18 +129,16 @@ if input_type == "Image":
     </p>
     """, unsafe_allow_html=True)
 
-    st.markdown("<div class='card'>", unsafe_allow_html=True)
     uploaded_file = st.file_uploader("Upload Image", type=["jpg", "png", "jpeg"])
-    st.markdown("</div>", unsafe_allow_html=True)
 
     if uploaded_file:
-        file_bytes = np.asarray(bytearray(uploaded_file.read()), dtype=np.uint8)
-        img = cv2.imdecode(file_bytes, 1)
+        image = Image.open(uploaded_file).convert("RGB")
+        image_np = np.array(image)
 
-        results = model(img)[0]
-        img = draw_boxes(img, results, confidence)
+        results = model(image_np)[0]
+        annotated = results.plot()  # YOLO built-in drawing
 
-        st.image(img, channels="BGR", use_container_width=True)
+        st.image(annotated, channels="RGB", use_container_width=True)
 
 # ---------------- VIDEO ----------------
 elif input_type == "Video":
@@ -185,13 +150,13 @@ elif input_type == "Video":
     </p>
     """, unsafe_allow_html=True)
 
-    st.markdown("<div class='card'>", unsafe_allow_html=True)
     uploaded_video = st.file_uploader("Upload Video", type=["mp4", "avi", "mov"])
-    st.markdown("</div>", unsafe_allow_html=True)
 
     if uploaded_video:
         tfile = tempfile.NamedTemporaryFile(delete=False)
         tfile.write(uploaded_video.read())
+
+        import cv2  # only for video reading (safe use)
 
         cap = cv2.VideoCapture(tfile.name)
         stframe = st.empty()
@@ -202,36 +167,33 @@ elif input_type == "Video":
                 break
 
             results = model(frame)[0]
-            frame = draw_boxes(frame, results, confidence)
+            frame = results.plot()
 
-            stframe.image(frame, channels="BGR", use_container_width=True)
+            stframe.image(frame, channels="RGB", use_container_width=True)
 
         cap.release()
 
-# ---------------- WEBCAM ----------------
+# ---------------- WEBCAM (MOBILE + CLOUD SAFE) ----------------
 elif input_type == "Webcam":
 
     st.markdown("""
-    <h2 style='text-align:center; color:#38bdf8;'>📸 Webcam Detection</h2>
+    <h2 style='text-align:center; color:#38bdf8;'>📸 Live Mobile / Webcam Detection</h2>
     <p style='text-align:center; color:#94a3b8;'>
-    Live detection using your camera
+    Works on mobile phone & laptop browser camera
     </p>
     """, unsafe_allow_html=True)
 
-    run = st.checkbox("Start Webcam")
+    class VideoProcessor(VideoTransformerBase):
+        def recv(self, frame):
+            img = frame.to_ndarray(format="bgr24")
 
-    FRAME_WINDOW = st.image([])
-    camera = cv2.VideoCapture(0)
+            results = model(img)[0]
+            annotated = results.plot()
 
-    while run:
-        ret, frame = camera.read()
-        if not ret:
-            st.error("Webcam not accessible")
-            break
+            return av.VideoFrame.from_ndarray(annotated, format="bgr24")
 
-        results = model(frame)[0]
-        frame = draw_boxes(frame, results, confidence)
-
-        FRAME_WINDOW.image(frame, channels="BGR", use_container_width=True)
-
-    camera.release()
+    webrtc_streamer(
+        key="helmet-detection",
+        video_processor_factory=VideoProcessor,
+        media_stream_constraints={"video": True, "audio": False},
+    )
